@@ -1,0 +1,52 @@
+[package]
+name = "agentropic-examples"
+version = "0.1.0"
+edition = "2021"
+authors = ["Agentropic <agentropic@gmail.com>"]
+license = "MIT OR Apache-2.0"
+description = "Example applications demonstrating the Agentropic multi-agent framework"
+repository = "https://github.com/agentropic/agentropic-examples"
+keywords = ["agents", "multi-agent", "examples", "autonomous"]
+publish = false
+
+[dependencies]
+agentropic-core = { git = "https://github.com/agentropic/agentropic-core", branch = "main" }
+agentropic-messaging = { git = "https://github.com/agentropic/agentropic-messaging", branch = "main" }
+agentropic-cognition = { git = "https://github.com/agentropic/agentropic-cognition", branch = "main" }
+agentropic-patterns = { git = "https://github.com/agentropic/agentropic-patterns", branch = "main" }
+agentropic-runtime = { git = "https://github.com/agentropic/agentropic-runtime", branch = "main" }
+
+async-trait = "0.1"
+tokio = { version = "1.0", features = ["full"] }
+
+[[example]]
+name = "hello_agent"
+path = "examples/hello_agent.rs"
+
+[[example]]
+name = "messaging"
+path = "examples/messaging.rs"
+
+[[example]]
+name = "bdi_reasoning"
+path = "examples/bdi_reasoning.rs"
+
+[[example]]
+name = "market_auction"
+path = "examples/market_auction.rs"
+
+[[example]]
+name = "swarm_consensus"
+path = "examples/swarm_consensus.rs"
+
+[[example]]
+name = "hierarchy_delegation"
+path = "examples/hierarchy_delegation.rs"
+
+[[example]]
+name = "supervised_agents"
+path = "examples/supervised_agents.rs"
+
+[[example]]
+name = "full_system"
+path = "examples/full_system.rs"
