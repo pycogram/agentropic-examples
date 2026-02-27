@@ -1,68 +1,52 @@
-use agentropic_core::prelude::*;
+//! Simplest possible agent — spawns with Runtime, ticks, shuts down.
+use agentropic_core::{Agent, AgentContext, AgentId, AgentResult};
+use agentropic_runtime::prelude::*;
+use async_trait::async_trait;
 
 struct GreeterAgent {
     id: AgentId,
-    name: String,
-    greet_count: u32,
+    count: u32,
 }
 
 impl GreeterAgent {
-    fn new(name: impl Into<String>) -> Self {
-        Self {
-            id: AgentId::new(),
-            name: name.into(),
-            greet_count: 0,
-        }
+    fn new() -> Self {
+        Self { id: AgentId::new(), count: 0 }
     }
 }
 
 #[async_trait]
 impl Agent for GreeterAgent {
-    fn id(&self) -> &AgentId {
-        &self.id
-    }
+    fn id(&self) -> &AgentId { &self.id }
 
-    async fn initialize(&mut self, ctx: &AgentContext) -> AgentResult<()> {
-        ctx.log_info(&format!("{} is warming up...", self.name));
+    async fn initialize(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        println!("  [Greeter] Hello! I'm alive.");
         Ok(())
     }
 
-    async fn execute(&mut self, ctx: &AgentContext) -> AgentResult<()> {
-        self.greet_count += 1;
-        ctx.log_info(&format!(
-            "{} says: Hello, world! (greeting #{})",
-            self.name, self.greet_count
-        ));
+    async fn execute(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        self.count += 1;
+        println!("  [Greeter] Tick #{}", self.count);
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         Ok(())
     }
 
-    async fn shutdown(&mut self, ctx: &AgentContext) -> AgentResult<()> {
-        ctx.log_info(&format!(
-            "{} shutting down after {} greetings. Goodbye!",
-            self.name, self.greet_count
-        ));
+    async fn shutdown(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        println!("  [Greeter] Goodbye after {} ticks!", self.count);
         Ok(())
     }
 }
 
 #[tokio::main]
-async fn main() {
-    println!("=== Hello Agent Example ===\n");
+async fn main() -> Result<(), RuntimeError> {
+    println!("=== Hello Agent ===\n");
 
-    let mut agent = GreeterAgent::new("Alice");
-    let ctx = AgentContext::new(*agent.id());
+    let runtime = Runtime::new();
+    runtime.spawn(Box::new(GreeterAgent::new()), "greeter").await?;
 
-    println!("Agent ID: {}", agent.id());
+    println!("  Agent running for 3 seconds...\n");
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-    let state = AgentState::Created;
-    println!("State: {:?}", state);
-    assert!(state.can_transition_to(AgentState::Initialized));
-
-    agent.initialize(&ctx).await.expect("init failed");
-    agent.execute(&ctx).await.expect("execute failed");
-    agent.execute(&ctx).await.expect("execute failed");
-    agent.execute(&ctx).await.expect("execute failed");
-    agent.shutdown(&ctx).await.expect("shutdown failed");
-
+    runtime.shutdown().await?;
     println!("\n=== Done ===");
+    Ok(())
 }
