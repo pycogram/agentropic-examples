@@ -1,47 +1,48 @@
-# agentropic-examples
+# Agentropic Examples
 
-Working examples demonstrating the [Agentropic](https://github.com/agentropic/agentropic) multi-agent framework.
+Working examples demonstrating the [Agentropic](https://github.com/agentropic) multi-agent framework.
 
 ## Examples
 
-| Example | Crates Used | What It Shows |
-|---------|-------------|---------------|
-| `hello_agent` | core | Agent trait, lifecycle, state transitions |
-| `messaging` | core, messaging | Router, FIPA performatives, message builder |
-| `bdi_reasoning` | cognition | Utility-based strategy evaluation |
-| `market_auction` | core, patterns | English and sealed-bid auctions, resource allocation |
-| `swarm_consensus` | core, patterns | Flocking, foraging, consensus voting |
-| `hierarchy_delegation` | core, patterns | Org levels, task delegation, team roles |
-| `supervised_agents` | core, runtime | Health checks, circuit breaker, backoff, metrics |
-| `full_system` | **all 5** | End-to-end trading system integrating every crate |
+| Example | What it shows |
+|---------|--------------|
+| `hello_agent` | Spawn an agent with Runtime, watch it tick |
+| `messaging` | Two agents send messages through the Router |
+| `agents_talking` | Three agents: asker, responder, observer |
+| `supervised_agents` | Agent crashes 3 times, Supervisor restarts it |
+| `cognitive_agent` | Reasons from BeliefBase, falls back to LLM |
+| `full_system` | All features together in one demo |
 
-## Running
+## Run
 ```bash
-# Run a specific example
 cargo run --example hello_agent
-
-# Run all examples
-for ex in hello_agent messaging bdi_reasoning market_auction swarm_consensus hierarchy_delegation supervised_agents full_system; do
-  echo "=== $ex ==="
-  cargo run --example $ex
-  echo
-done
+cargo run --example messaging
+cargo run --example agents_talking
+cargo run --example supervised_agents
+cargo run --example cognitive_agent
+cargo run --example full_system
 ```
 
-## Workspace Setup
+## Cognitive Agent Setup
 
-Add this crate to your root `Cargo.toml`:
-```toml
-[workspace]
-members = [
-    "agentropic-core",
-    "agentropic-messaging",
-    "agentropic-cognition",
-    "agentropic-patterns",
-    "agentropic-runtime",
-    "agentropic",
-    "agentropic-examples",
-]
+The `cognitive_agent` and `full_system` examples need data files:
+
+- `data/beliefs.json` — Knowledge base (included)
+- `data/config.json` — LLM provider config (included, defaults to Ollama)
+
+To use Ollama locally:
+```bash
+curl -fsSL https://ollama.ai/install.sh | sh
+ollama pull mistral
+```
+
+To switch to Claude API, edit `data/config.json`:
+```json
+{
+  "llm_provider": "claude",
+  "llm_model": "claude-sonnet-4-20250514",
+  "api_key": "your-key-here"
+}
 ```
 
 ## License
