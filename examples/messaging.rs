@@ -1,103 +1,97 @@
-use agentropic_core::prelude::*;
-use agentropic_messaging::prelude::*;
+//! Two agents exchanging messages through the Runtime's Router.
+use agentropic_core::{Agent, AgentContext, AgentId, AgentResult};
+use agentropic_runtime::prelude::*;
+use async_trait::async_trait;
 
-struct ChatAgent {
+struct PingAgent {
     id: AgentId,
-    name: String,
+    pinged: bool,
 }
 
-impl ChatAgent {
-    fn new(name: impl Into<String>) -> Self {
-        Self {
-            id: AgentId::new(),
-            name: name.into(),
-        }
-    }
-
-    fn name(&self) -> &str {
-        &self.name
-    }
+impl PingAgent {
+    fn new() -> Self { Self { id: AgentId::new(), pinged: false } }
 }
 
 #[async_trait]
-impl Agent for ChatAgent {
-    fn id(&self) -> &AgentId {
-        &self.id
+impl Agent for PingAgent {
+    fn id(&self) -> &AgentId { &self.id }
+
+    async fn initialize(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        println!("  [Ping] Ready.");
+        Ok(())
     }
 
-    async fn initialize(&mut self, ctx: &AgentContext) -> AgentResult<()> {
-        ctx.log_info(&format!("{} connected to chat", self.name));
+    async fn execute(&mut self, ctx: &AgentContext) -> AgentResult<()> {
+        if !self.pinged {
+            println!("  [Ping] → Sending 'ping!' to Pong");
+            ctx.send_message("pong", "request", "ping!");
+            self.pinged = true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        Ok(())
+    }
+
+    async fn shutdown(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        println!("  [Ping] Done.");
+        Ok(())
+    }
+
+    async fn handle_message(
+        &mut self, _ctx: &AgentContext, _sender: &str, _perf: &str, content: &str,
+    ) -> AgentResult<()> {
+        println!("  [Ping] ← Received: \"{}\"", content);
+        Ok(())
+    }
+}
+
+struct PongAgent {
+    id: AgentId,
+}
+
+impl PongAgent {
+    fn new() -> Self { Self { id: AgentId::new() } }
+}
+
+#[async_trait]
+impl Agent for PongAgent {
+    fn id(&self) -> &AgentId { &self.id }
+
+    async fn initialize(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        println!("  [Pong] Ready.");
         Ok(())
     }
 
     async fn execute(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         Ok(())
     }
 
-    async fn shutdown(&mut self, ctx: &AgentContext) -> AgentResult<()> {
-        ctx.log_info(&format!("{} left the chat", self.name));
+    async fn shutdown(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        println!("  [Pong] Done.");
+        Ok(())
+    }
+
+    async fn handle_message(
+        &mut self, ctx: &AgentContext, sender: &str, _perf: &str, content: &str,
+    ) -> AgentResult<()> {
+        println!("  [Pong] ← Received: \"{}\"", content);
+        println!("  [Pong] → Replying: \"pong!\"");
+        ctx.send_message(sender, "inform", "pong!");
         Ok(())
     }
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), RuntimeError> {
     println!("=== Messaging Example ===\n");
 
-    let alice = ChatAgent::new("Alice");
-    let bob = ChatAgent::new("Bob");
+    let runtime = Runtime::new();
+    runtime.spawn(Box::new(PongAgent::new()), "pong").await?;
+    runtime.spawn(Box::new(PingAgent::new()), "ping").await?;
 
-    println!("Created {} ({})", alice.name(), alice.id());
-    println!("Created {} ({})", bob.name(), bob.id());
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-    let router = Router::new();
-    let mut alice_inbox = router.register(*alice.id()).expect("register alice");
-    let mut bob_inbox = router.register(*bob.id()).expect("register bob");
-
-    println!("\nBoth agents registered with router");
-
-    let msg1 = Message::new(
-        *alice.id(),
-        *bob.id(),
-        Performative::Request,
-        "Hey Bob, can you process this data?",
-    );
-    println!("\n--- Alice -> Bob ---");
-    println!("Performative: {}", msg1.performative());
-    println!("Content: {}", msg1.content());
-    router.send(msg1).expect("send msg1");
-
-    let received = bob_inbox.recv().await.expect("bob receive");
-    println!("\nBob received: \"{}\"", received.content());
-
-    let reply = MessageBuilder::new()
-        .sender(*bob.id())
-        .receiver(*alice.id())
-        .performative(Performative::Inform)
-        .content("Done! Here are the results.")
-        .conversation_id("data-processing-001".to_string())
-        .in_reply_to(received.id())
-        .build()
-        .expect("build reply");
-
-    println!("\n--- Bob -> Alice ---");
-    println!("Performative: {}", reply.performative());
-    println!("Content: {}", reply.content());
-    router.send(reply).expect("send reply");
-
-    let response = alice_inbox.recv().await.expect("alice receive");
-    println!("\nAlice received: \"{}\"", response.content());
-
-    let ack = Message::new(
-        *alice.id(),
-        *bob.id(),
-        Performative::Confirm,
-        "Thanks Bob, confirmed!",
-    );
-    router.send(ack).expect("send ack");
-
-    let final_msg = bob_inbox.recv().await.expect("bob receive ack");
-    println!("Bob received: \"{}\" ({})", final_msg.content(), final_msg.performative());
-
+    runtime.shutdown().await?;
     println!("\n=== Done ===");
+    Ok(())
 }

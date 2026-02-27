@@ -10,14 +10,16 @@ keywords = ["agents", "multi-agent", "examples", "autonomous"]
 publish = false
 
 [dependencies]
-agentropic-core = { git = "https://github.com/agentropic/agentropic-core", branch = "main" }
+agentropic-core = { git = "https://github.com/agentropic/agentropic-core", branch = "fixes-all-v3" }
 agentropic-messaging = { git = "https://github.com/agentropic/agentropic-messaging", branch = "main" }
 agentropic-cognition = { git = "https://github.com/agentropic/agentropic-cognition", branch = "main" }
 agentropic-patterns = { git = "https://github.com/agentropic/agentropic-patterns", branch = "main" }
-agentropic-runtime = { git = "https://github.com/agentropic/agentropic-runtime", branch = "main" }
-
+agentropic-runtime = { git = "https://github.com/agentropic/agentropic-runtime", branch = "docs/json" }
 async-trait = "0.1"
 tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.12", features = ["json"] }
 
 [[example]]
 name = "hello_agent"
@@ -28,24 +30,16 @@ name = "messaging"
 path = "examples/messaging.rs"
 
 [[example]]
-name = "bdi_reasoning"
-path = "examples/bdi_reasoning.rs"
-
-[[example]]
-name = "market_auction"
-path = "examples/market_auction.rs"
-
-[[example]]
-name = "swarm_consensus"
-path = "examples/swarm_consensus.rs"
-
-[[example]]
-name = "hierarchy_delegation"
-path = "examples/hierarchy_delegation.rs"
+name = "agents_talking"
+path = "examples/agents_talking.rs"
 
 [[example]]
 name = "supervised_agents"
 path = "examples/supervised_agents.rs"
+
+[[example]]
+name = "cognitive_agent"
+path = "examples/cognitive_agent.rs"
 
 [[example]]
 name = "full_system"
