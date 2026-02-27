@@ -1,132 +1,72 @@
-use agentropic_core::prelude::*;
+//! Agent crashes on purpose, Supervisor restarts it automatically.
+use agentropic_core::{Agent, AgentContext, AgentId, AgentError, AgentResult};
 use agentropic_runtime::prelude::*;
-use std::time::Duration;
+use async_trait::async_trait;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
-fn main() {
-    println!("=== Supervised Agents Example ===\n");
+struct FlakyAgent {
+    id: AgentId,
+    counter: Arc<AtomicU32>,
+    fail_until: u32,
+}
 
-    let worker_a = AgentId::new();
-    let worker_b = AgentId::new();
-    let worker_c = AgentId::new();
+impl FlakyAgent {
+    fn new(counter: Arc<AtomicU32>, fail_until: u32) -> Self {
+        Self { id: AgentId::new(), counter, fail_until }
+    }
+}
 
-    let mut supervisor = Supervisor::new("production_supervisor");
+#[async_trait]
+impl Agent for FlakyAgent {
+    fn id(&self) -> &AgentId { &self.id }
 
-    let always_restart = RestartPolicy::new(RestartStrategy::Always)
-        .with_max_retries(10)
-        .with_backoff_seconds(2);
-    let on_failure = RestartPolicy::new(RestartStrategy::OnFailure)
-        .with_max_retries(3)
-        .with_backoff_seconds(5);
-    let never_restart = RestartPolicy::new(RestartStrategy::Never);
-
-    supervisor.supervise(worker_a, always_restart);
-    supervisor.supervise(worker_b, on_failure);
-    supervisor.supervise(worker_c, never_restart);
-
-    println!("--- Supervisor: {} ---", supervisor.name());
-    println!("Supervised agents: {}\n", supervisor.supervised_count());
-
-    let workers = [
-        ("Worker A (always restart)", worker_a),
-        ("Worker B (on failure)", worker_b),
-        ("Worker C (never restart)", worker_c),
-    ];
-
-    for (name, id) in &workers {
-        let policy = supervisor.get_policy(id).unwrap();
-        println!(
-            "  {} -> {:?}, max_retries: {:?}, backoff: {}s",
-            name, policy.strategy(), policy.max_retries(), policy.backoff_seconds()
-        );
+    async fn initialize(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        println!("  [Flaky] Initialized (attempt {})", self.counter.load(Ordering::SeqCst) + 1);
+        Ok(())
     }
 
-    println!("\n--- Health Check Simulation ---");
+    async fn execute(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        let count = self.counter.fetch_add(1, Ordering::SeqCst);
 
-    if let Some(hc) = supervisor.get_health_check_mut(&worker_a) {
-        hc.record_healthy();
-        println!("  Worker A: {:?} (failures: {})", hc.status(), hc.failures());
+        if count < self.fail_until {
+            println!("  [Flaky] 💥 Crashing! (execution #{})", count + 1);
+            return Err(AgentError::ExecutionFailed(format!("Intentional crash #{}", count + 1)));
+        }
+
+        println!("  [Flaky] ✓ Running normally (execution #{})", count + 1);
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        Ok(())
     }
 
-    if let Some(hc) = supervisor.get_health_check_mut(&worker_b) {
-        hc.record_unhealthy();
-        hc.record_unhealthy();
-        hc.record_healthy();
-        println!("  Worker B: {:?} (failures: {})", hc.status(), hc.failures());
+    async fn shutdown(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        println!("  [Flaky] Shutdown.");
+        Ok(())
     }
+}
 
-    if let Some(hc) = supervisor.get_health_check_mut(&worker_c) {
-        hc.record_unhealthy();
-        hc.record_unhealthy();
-        hc.record_unhealthy();
-        println!("  Worker C: {:?} (failures: {})", hc.status(), hc.failures());
-    }
+#[tokio::main]
+async fn main() -> Result<(), RuntimeError> {
+    println!("=== Supervised Agent ===\n");
+    println!("  Agent will crash 3 times, then run normally.\n");
 
-    println!("\n--- Circuit Breaker ---");
-    let mut breaker = CircuitBreaker::new(3, Duration::from_secs(30));
+    let runtime = Runtime::new();
+    let counter = Arc::new(AtomicU32::new(0));
 
-    println!("Initial state: {:?}", breaker.state());
+    let agent = FlakyAgent::new(counter.clone(), 3);
+    let policy = RestartPolicy::new(RestartStrategy::OnFailure)
+        .with_max_retries(5)
+        .with_backoff_seconds(1);
 
-    breaker.record_failure();
-    breaker.record_failure();
-    println!("After 2 failures: {:?} (allowed: {})", breaker.state(), breaker.is_allowed());
+    runtime.spawn_with_policy(Box::new(agent), "flaky", policy).await?;
 
-    breaker.record_failure();
-    println!("After 3 failures: {:?} (allowed: {})", breaker.state(), breaker.is_allowed());
+    // Wait for crashes + restarts + normal execution
+    tokio::time::sleep(std::time::Duration::from_secs(8)).await;
 
-    breaker.record_success();
-    println!("After success:    {:?} (allowed: {})", breaker.state(), breaker.is_allowed());
+    let total = counter.load(Ordering::SeqCst);
+    println!("\n  Total executions: {} (3 crashes + {} successful)", total, total - 3);
 
-    println!("\n--- Exponential Backoff ---");
-    let mut backoff = ExponentialBackoff::new(
-        Duration::from_millis(100),
-        Duration::from_secs(10),
-    );
-
-    for i in 1..=6 {
-        let delay = backoff.next_delay();
-        println!("  Retry {}: wait {:?}", i, delay);
-    }
-
-    println!("  Resetting...");
-    backoff.reset();
-    println!("  After reset: wait {:?}", backoff.next_delay());
-
-    println!("\n--- Metrics Collection ---");
-    let mut registry = MetricsRegistry::new();
-
-    let mut agent_metrics = Collector::new();
-    agent_metrics.record(
-        Metric::new("messages_sent", MetricType::Counter, 142.0)
-            .with_label("agent", "worker_a"),
-    );
-    agent_metrics.record(
-        Metric::new("cpu_usage", MetricType::Gauge, 45.2)
-            .with_label("agent", "worker_a"),
-    );
-    agent_metrics.record(
-        Metric::new("response_time_ms", MetricType::Histogram, 12.5)
-            .with_label("agent", "worker_b"),
-    );
-
-    registry.register("agent_metrics", agent_metrics);
-
-    let exporter = MetricsExporter::new(registry);
-    match exporter.export_json() {
-        Ok(json) => println!("{}", json),
-        Err(e) => eprintln!("Export failed: {}", e),
-    }
-
-    println!("\n--- Task Queue ---");
-    let mut queue = TaskQueue::new();
-    queue.push(Task::new(worker_a, 3));
-    queue.push(Task::new(worker_b, 1));
-    queue.push(Task::new(worker_c, 2));
-
-    println!("Tasks queued: {}", queue.len());
-    while let Some(task) = queue.pop() {
-        println!("  Processing agent {} (priority {})", task.agent_id(), task.priority());
-    }
-    println!("Queue empty: {}", queue.is_empty());
-
+    runtime.shutdown().await?;
     println!("\n=== Done ===");
+    Ok(())
 }
