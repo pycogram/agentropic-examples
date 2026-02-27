@@ -1,216 +1,207 @@
-use agentropic_core::prelude::*;
-use agentropic_cognition::UtilityFunction;
-use agentropic_messaging::prelude::*;
-use agentropic_patterns::prelude::*;
-use agentropic_patterns::federation::PolicyType as FedPolicyType;
+//! Full system demo: agents run, talk, reason, and self-heal.
+use agentropic_core::{Agent, AgentContext, AgentId, AgentError, AgentResult};
+use agentropic_cognition::Rule;
 use agentropic_runtime::prelude::*;
+use agentropic_runtime::CognitiveAgent;
+use async_trait::async_trait;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
-struct TradingAgent {
+/// Worker that does tasks and reports to manager
+struct WorkerAgent {
     id: AgentId,
     name: String,
-    strategy: UtilityFunction,
+    tasks_done: u32,
 }
 
-impl TradingAgent {
-    fn new(name: impl Into<String>, strategy: UtilityFunction) -> Self {
-        Self {
-            id: AgentId::new(),
-            name: name.into(),
-            strategy,
-        }
-    }
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn evaluate(&self, market_state: &[String]) -> f64 {
-        self.strategy.evaluate(market_state)
+impl WorkerAgent {
+    fn new(name: &str) -> Self {
+        Self { id: AgentId::new(), name: name.to_string(), tasks_done: 0 }
     }
 }
 
 #[async_trait]
-impl Agent for TradingAgent {
-    fn id(&self) -> &AgentId {
-        &self.id
-    }
+impl Agent for WorkerAgent {
+    fn id(&self) -> &AgentId { &self.id }
 
-    async fn initialize(&mut self, ctx: &AgentContext) -> AgentResult<()> {
-        ctx.log_info(&format!("{} online, strategy: {}", self.name, self.strategy.name()));
+    async fn initialize(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        println!("  [{}] Online.", self.name);
         Ok(())
     }
 
     async fn execute(&mut self, ctx: &AgentContext) -> AgentResult<()> {
-        ctx.log_info(&format!("{} executing trade cycle", self.name));
+        self.tasks_done += 1;
+        if self.tasks_done <= 3 {
+            let report = format!("{} completed task #{}", self.name, self.tasks_done);
+            ctx.send_message("manager", "inform", &report);
+            println!("  [{}] {}", self.name, report);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         Ok(())
     }
 
-    async fn shutdown(&mut self, ctx: &AgentContext) -> AgentResult<()> {
-        ctx.log_info(&format!("{} closing positions", self.name));
+    async fn shutdown(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        println!("  [{}] Finished {} tasks.", self.name, self.tasks_done);
+        Ok(())
+    }
+}
+
+/// Manager that receives reports from workers
+struct ManagerAgent {
+    id: AgentId,
+    reports: Vec<String>,
+}
+
+impl ManagerAgent {
+    fn new() -> Self {
+        Self { id: AgentId::new(), reports: Vec::new() }
+    }
+}
+
+#[async_trait]
+impl Agent for ManagerAgent {
+    fn id(&self) -> &AgentId { &self.id }
+
+    async fn initialize(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        println!("  [Manager] Overseeing workers.");
+        Ok(())
+    }
+
+    async fn execute(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        Ok(())
+    }
+
+    async fn shutdown(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        println!("  [Manager] Received {} reports total.", self.reports.len());
+        Ok(())
+    }
+
+    async fn handle_message(&mut self, _ctx: &AgentContext, _s: &str, _p: &str, content: &str) -> AgentResult<()> {
+        println!("  [Manager] ← Report: \"{}\"", content);
+        self.reports.push(content.to_string());
+        Ok(())
+    }
+}
+
+/// Unreliable agent that crashes, gets restarted by supervisor
+struct UnreliableAgent {
+    id: AgentId,
+    counter: Arc<AtomicU32>,
+}
+
+impl UnreliableAgent {
+    fn new(counter: Arc<AtomicU32>) -> Self {
+        Self { id: AgentId::new(), counter }
+    }
+}
+
+#[async_trait]
+impl Agent for UnreliableAgent {
+    fn id(&self) -> &AgentId { &self.id }
+    async fn initialize(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        println!("  [Unreliable] Starting...");
+        Ok(())
+    }
+    async fn execute(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        let count = self.counter.fetch_add(1, Ordering::SeqCst);
+        if count < 2 {
+            println!("  [Unreliable] 💥 Crash #{}", count + 1);
+            return Err(AgentError::ExecutionFailed("boom".into()));
+        }
+        println!("  [Unreliable] ✓ Stable now (tick {})", count + 1);
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        Ok(())
+    }
+    async fn shutdown(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
+        println!("  [Unreliable] Shutdown.");
         Ok(())
     }
 }
 
 #[tokio::main]
-async fn main() {
-    println!("=== AGENTROPIC Full System Demo ===\n");
+async fn main() -> Result<(), RuntimeError> {
+    println!("╔═══════════════════════════════════════════════╗");
+    println!("║   Agentropic — Full System Demo               ║");
+    println!("║   Running + Messaging + Reasoning + Recovery   ║");
+    println!("╚═══════════════════════════════════════════════╝\n");
 
-    // 1. Create agents (core + cognition)
-    println!("--- 1. Agent Creation ---\n");
+    let runtime = Runtime::new();
 
-    let mut alpha = TradingAgent::new(
-        "Alpha",
-        UtilityFunction::new("momentum", |state: &[String]| {
-            if state.iter().any(|s| s.contains("uptrend")) { 0.9 } else { 0.3 }
-        }),
-    );
-    let mut beta = TradingAgent::new(
-        "Beta",
-        UtilityFunction::new("mean_reversion", |state: &[String]| {
-            if state.iter().any(|s| s.contains("oversold")) { 0.85 } else { 0.4 }
-        }),
-    );
-    let mut gamma = TradingAgent::new("Gamma", UtilityFunction::simple("passive"));
+    // --- 1. Workers report to Manager ---
+    println!("--- Stage 1: Workers & Manager ---\n");
 
-    for agent in [&mut alpha, &mut beta, &mut gamma] {
-        let ctx = AgentContext::new(*agent.id());
-        agent.initialize(&ctx).await.unwrap();
-    }
+    runtime.spawn(Box::new(ManagerAgent::new()), "manager").await?;
+    runtime.spawn(Box::new(WorkerAgent::new("Alpha")), "alpha").await?;
+    runtime.spawn(Box::new(WorkerAgent::new("Beta")), "beta").await?;
 
-    // 2. Messaging
-    println!("\n--- 2. Messaging Layer ---\n");
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-    let router = Router::new();
-    let mut alpha_rx = router.register(*alpha.id()).unwrap();
-    let mut beta_rx = router.register(*beta.id()).unwrap();
-    let _gamma_rx = router.register(*gamma.id()).unwrap();
+    // --- 2. Cognitive Agent answers questions ---
+    println!("\n--- Stage 2: Cognitive Reasoning ---\n");
 
-    let proposal = MessageBuilder::new()
-        .sender(*alpha.id())
-        .receiver(*beta.id())
-        .performative(Performative::Propose)
-        .content("Buy ETH/USD at 3200, size 10")
-        .conversation_id("trade-001".to_string())
-        .build()
-        .unwrap();
+    let mut thinker = CognitiveAgent::from_config("data/beliefs.json", "data/config.json");
+    thinker.add_rule(Rule::new("topic:what_is")
+        .with_condition("what").with_condition("agentropic")
+        .with_conclusion("what_is_agentropic"));
+    thinker.add_rule(Rule::new("topic:patterns")
+        .with_condition("pattern").with_condition("support")
+        .with_conclusion("patterns"));
 
-    println!("Alpha -> Beta: [{}] {}", proposal.performative(), proposal.content());
-    router.send(proposal).unwrap();
+    runtime.spawn(Box::new(thinker), "thinker").await?;
 
-    let received = beta_rx.recv().await.unwrap();
-    println!("Beta received: \"{}\"", received.content());
+    // Alpha asks Thinker a question
+    // (We simulate by spawning a quick asker)
+    struct QuickAsker { id: AgentId, asked: bool }
+    impl QuickAsker { fn new() -> Self { Self { id: AgentId::new(), asked: false } } }
 
-    let acceptance = Message::new(*beta.id(), *alpha.id(), Performative::Accept, "Accepted. Executing buy order.");
-    router.send(acceptance).unwrap();
-
-    let response = alpha_rx.recv().await.unwrap();
-    println!("Alpha received: \"{}\" ({})", response.content(), response.performative());
-
-    // 3. Strategy evaluation (cognition)
-    println!("\n--- 3. Strategy Evaluation ---\n");
-
-    let market_state = vec!["uptrend".to_string(), "high_volume".to_string(), "oversold".to_string()];
-
-    let agents: Vec<&TradingAgent> = vec![&alpha, &beta, &gamma];
-    for agent in &agents {
-        println!("  {} ({}): {:.2}", agent.name(), agent.strategy.name(), agent.evaluate(&market_state));
-    }
-
-    let best = agents.iter().max_by(|a, b| {
-        a.evaluate(&market_state).partial_cmp(&b.evaluate(&market_state)).unwrap()
-    }).unwrap();
-    println!("  -> Lead trader: {}", best.name());
-
-    // 4. Coalition (patterns)
-    println!("\n--- 4. Coalition Formation ---\n");
-
-    let mut coalition = Coalition::new("trading_syndicate");
-    coalition.add_member(*alpha.id());
-    coalition.add_member(*beta.id());
-    coalition.add_member(*gamma.id());
-
-    let strategy = Strategy::new(StrategyType::MaximizeUtility)
-        .with_parameter("risk_tolerance", 0.7)
-        .with_parameter("position_limit", 100.0);
-    coalition.set_strategy(strategy);
-    coalition.set_value(25000.0);
-
-    println!("Coalition: {}", coalition.name());
-    println!("Members: {}", coalition.size());
-    println!("Value: ${:.2}", coalition.value());
-
-    // 5. Federation (patterns)
-    println!("\n--- 5. Federation Governance ---\n");
-
-    let mut federation = Federation::new("trading_federation");
-    federation.add_member(*alpha.id());
-    federation.add_member(*beta.id());
-    federation.add_member(*gamma.id());
-    federation.set_weight(*alpha.id(), 2.0);
-    federation.set_weight(*beta.id(), 1.5);
-    federation.set_weight(*gamma.id(), 1.0);
-
-    let policy = Policy::new("trade_approval", FedPolicyType::WeightedVote)
-        .with_threshold(0.6)
-        .with_rule("All trades > $10k require approval")
-        .with_rule("Maximum 3 open positions per agent");
-    federation.add_policy(policy);
-
-    println!("Federation: {} ({} members)", federation.name(), federation.size());
-    if let Some(p) = federation.get_policy("trade_approval") {
-        println!("Policy: {} ({:?}, threshold: {:.0}%)", p.name(), p.policy_type(), p.threshold() * 100.0);
-        for rule in p.rules() {
-            println!("  - {}", rule);
+    #[async_trait]
+    impl Agent for QuickAsker {
+        fn id(&self) -> &AgentId { &self.id }
+        async fn initialize(&mut self, _ctx: &AgentContext) -> AgentResult<()> { Ok(()) }
+        async fn execute(&mut self, ctx: &AgentContext) -> AgentResult<()> {
+            if !self.asked {
+                println!("  [QuickAsker] → \"What is Agentropic?\"");
+                ctx.send_message("thinker", "query", "What is Agentropic?");
+                self.asked = true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            Ok(())
+        }
+        async fn shutdown(&mut self, _ctx: &AgentContext) -> AgentResult<()> { Ok(()) }
+        async fn handle_message(&mut self, _ctx: &AgentContext, _s: &str, _p: &str, content: &str) -> AgentResult<()> {
+            println!("  [QuickAsker] ← \"{}\"", content);
+            Ok(())
         }
     }
 
-    // 6. Supervision (runtime)
-    println!("\n--- 6. Runtime Supervision ---\n");
+    runtime.spawn(Box::new(QuickAsker::new()), "quick_asker").await?;
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-    let mut supervisor = Supervisor::new("trading_supervisor");
-    supervisor.supervise(*alpha.id(), RestartPolicy::new(RestartStrategy::Always).with_max_retries(5));
-    supervisor.supervise(*beta.id(), RestartPolicy::new(RestartStrategy::OnFailure).with_max_retries(3));
-    supervisor.supervise(*gamma.id(), RestartPolicy::new(RestartStrategy::Never));
+    // --- 3. Self-healing agent ---
+    println!("\n--- Stage 3: Self-Healing ---\n");
 
-    println!("Supervisor: {} ({} agents)", supervisor.name(), supervisor.supervised_count());
+    let crash_counter = Arc::new(AtomicU32::new(0));
+    let policy = RestartPolicy::new(RestartStrategy::OnFailure)
+        .with_max_retries(5)
+        .with_backoff_seconds(1);
 
-    for agent in &agents {
-        if let Some(hc) = supervisor.get_health_check_mut(agent.id()) {
-            hc.record_healthy();
-        }
-    }
-    if let Some(hc) = supervisor.get_health_check_mut(beta.id()) {
-        hc.record_unhealthy();
-    }
+    runtime.spawn_with_policy(
+        Box::new(UnreliableAgent::new(crash_counter.clone())),
+        "unreliable",
+        policy,
+    ).await?;
 
-    for agent in &agents {
-        if let Some(hc) = supervisor.get_health_check(agent.id()) {
-            let status = if hc.is_healthy() { "OK" } else { "!!" };
-            println!("  [{}] {} ({:?})", status, agent.name(), hc.status());
-        }
-    }
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-    // 7. Metrics
-    println!("\n--- 7. Metrics ---\n");
+    // --- Summary ---
+    println!("\n--- Summary ---");
+    println!("  Agents running: {}", runtime.agent_count().await);
+    println!("  Crash counter: {} (2 crashes + recovery)", crash_counter.load(Ordering::SeqCst));
 
-    let mut registry = MetricsRegistry::new();
-    let mut collector = Collector::new();
-    collector.record(Metric::new("trades_executed", MetricType::Counter, 47.0).with_label("coalition", "syndicate"));
-    collector.record(Metric::new("pnl_usd", MetricType::Gauge, 1250.50).with_label("coalition", "syndicate"));
-    collector.record(Metric::new("latency_ms", MetricType::Histogram, 3.2).with_label("agent", "alpha"));
-    registry.register("trading", collector);
+    println!("\n--- Shutting down ---\n");
+    runtime.shutdown().await?;
 
-    let exporter = MetricsExporter::new(registry);
-    if let Ok(json) = exporter.export_json() {
-        println!("{}", json);
-    }
-
-    // Shutdown
-    println!("\n--- Shutdown ---\n");
-    for agent in [&mut alpha, &mut beta, &mut gamma] {
-        let ctx = AgentContext::new(*agent.id());
-        agent.shutdown(&ctx).await.unwrap();
-    }
-
-    println!("\n=== All systems nominal ===");
+    println!("\n✓ Full system demo complete.");
+    Ok(())
 }
