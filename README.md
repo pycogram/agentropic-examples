@@ -13,6 +13,19 @@ Working examples demonstrating the [Agentropic](https://github.com/agentropic) m
 | `cognitive_agent` | Reasons from BeliefBase, falls back to LLM |
 | `full_system` | All features together in one demo |
 
+### Patterns
+
+| Pattern | What it shows |
+|---------|--------------|
+| `team_pattern` | Leader assigns tasks, Executors work, Coordinator tracks |
+| `hierarchy_pattern` | Commander -> Captain -> Soldiers, orders down, reports up |
+| `swarm_pattern` | Decentralized consensus voting, no leader |
+| `coalition_pattern` | Temporary alliance for a mission, then disband |
+| `market_pattern` | Sealed-bid auction, highest bidder wins |
+| `federation_pattern` | Weighted voting on proposals |
+| `holarchy_pattern` | Nested autonomous units delegate down |
+| `blackboard_pattern` | Shared knowledge space for collaborative problem solving |
+
 ## Run
 ```bash
 cargo run --example hello_agent
@@ -21,6 +34,16 @@ cargo run --example agents_talking
 cargo run --example supervised_agents
 cargo run --example cognitive_agent
 cargo run --example full_system
+
+# Patterns
+cargo run --example team_pattern
+cargo run --example hierarchy_pattern
+cargo run --example swarm_pattern
+cargo run --example coalition_pattern
+cargo run --example market_pattern
+cargo run --example federation_pattern
+cargo run --example holarchy_pattern
+cargo run --example blackboard_pattern
 ```
 
 ## Cognitive Agent Setup
