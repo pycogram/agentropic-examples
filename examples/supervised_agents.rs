@@ -30,7 +30,7 @@ impl Agent for FlakyAgent {
         let count = self.counter.fetch_add(1, Ordering::SeqCst);
 
         if count < self.fail_until {
-            println!("  [Flaky] 💥 Crashing! (execution #{})", count + 1);
+            println!("  [Flaky] Crashing! (execution #{})", count + 1);
             return Err(AgentError::ExecutionFailed(format!("Intentional crash #{}", count + 1)));
         }
 

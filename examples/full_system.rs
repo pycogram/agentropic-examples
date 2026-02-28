@@ -106,7 +106,7 @@ impl Agent for UnreliableAgent {
     async fn execute(&mut self, _ctx: &AgentContext) -> AgentResult<()> {
         let count = self.counter.fetch_add(1, Ordering::SeqCst);
         if count < 2 {
-            println!("  [Unreliable] 💥 Crash #{}", count + 1);
+            println!("  [Unreliable] Crash #{}", count + 1);
             return Err(AgentError::ExecutionFailed("boom".into()));
         }
         println!("  [Unreliable] ✓ Stable now (tick {})", count + 1);
