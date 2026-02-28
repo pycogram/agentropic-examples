@@ -44,3 +44,35 @@ path = "examples/cognitive_agent.rs"
 [[example]]
 name = "full_system"
 path = "examples/full_system.rs"
+
+[[example]]
+name = "team_pattern"
+path = "examples/team_pattern.rs"
+
+[[example]]
+name = "hierarchy_pattern"
+path = "examples/hierarchy_pattern.rs"
+
+[[example]]
+name = "swarm_pattern"
+path = "examples/swarm_pattern.rs"
+
+[[example]]
+name = "coalition_pattern"
+path = "examples/coalition_pattern.rs"
+
+[[example]]
+name = "market_pattern"
+path = "examples/market_pattern.rs"
+
+[[example]]
+name = "federation_pattern"
+path = "examples/federation_pattern.rs"
+
+[[example]]
+name = "holarchy_pattern"
+path = "examples/holarchy_pattern.rs"
+
+[[example]]
+name = "blackboard_pattern"
+path = "examples/blackboard_pattern.rs"
